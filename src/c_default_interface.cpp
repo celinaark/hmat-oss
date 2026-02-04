@@ -167,6 +167,21 @@ int hmat_tree_nodes_count(const hmat_cluster_tree_t * tree)
     return ((ClusterTree*)tree)->nodesCount();
 }
 
+int hmat_matrix_depth(const hmat_matrix_t * ptr) {
+    if (!ptr) return 0;
+    const hmat::HMatInterface<std::complex<double>>* iface = 
+        reinterpret_cast<const hmat::HMatInterface<std::complex<double>>*>(ptr);
+    if (iface->engine().hmat) {
+        const hmat::ClusterTree* tree = iface->engine().hmat->rowsTree();
+        
+        if (tree) {
+            return const_cast<hmat::ClusterTree*>(tree)->computeDepth();
+        }
+    }
+    return 0;
+}
+
+
 hmat_cluster_tree_t *hmat_cluster_get_son( hmat_cluster_tree_t * tree, int index )
 {
     ClusterTree *son = reinterpret_cast<ClusterTree*>(tree)->getChild(index);
