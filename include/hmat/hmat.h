@@ -1054,6 +1054,9 @@ typedef struct
   int compressionMinLeafSize;
   /*! \brief Tolerance for coarsening */
   double coarseningEpsilon;
+  /*size of leaf imposed */
+  int LeafSize;
+
   /*! \brief Maximum size of a leaf in a ClusterTree (and of a non-admissible block in an HMatrix) */
   int maxLeafSize;
   /*! \brief Coarsen the matrix structure after assembly. */

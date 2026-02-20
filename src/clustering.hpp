@@ -69,7 +69,7 @@ class ClusteringAlgorithm
 {
 public:
   /*! \brief Default constructor */
-  ClusteringAlgorithm() : maxLeafSize_(-1), divider_(2) {}
+  ClusteringAlgorithm() : LeafSize_(-1),maxLeafSize_(-1), divider_(2) {}
 
   /*! \brief Virtual constructor */
   virtual ClusteringAlgorithm* clone() const = 0;
@@ -93,9 +93,16 @@ public:
 
   int getMaxLeafSize() const;
   virtual void setMaxLeafSize(int maxLeafSize);
+ //getter & setter for leaf size  
+  int getLeafSize() const;
+  virtual void setLeafSize(int LeafSize);
 
   int getDivider() const;
   virtual void setDivider(int divider) const;
+
+/*leaf size imposed*/
+private:
+  int LeafSize_;
 
 private:
   int maxLeafSize_;
