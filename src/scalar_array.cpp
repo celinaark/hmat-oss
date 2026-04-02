@@ -63,6 +63,9 @@
 #include <jemalloc/jemalloc.h>
 #endif
 
+#ifdef HAVE_CUDA
+#include "cuda_manager.hpp"
+#endif
 namespace {
 struct EnvVarSA {
   bool sumCriterion;
@@ -416,9 +419,58 @@ void ScalarArray<T>::gemm(char transA, char transB, T alpha,
   assert(a->lda > 0);
   assert(b->lda > 0);
 
-  if (n > 1 || transB != 'N')
+  #ifdef HAVE_CUDA
+    if(hmat::CudaManager::getInstance().getCudaDeviceCount()){ //je vais changer les valeurs aprés en fct des résultat 
+      hmat::CudaManager::getInstance().setCudaDevice(); 
+    
+      T *d_A, *d_B, *d_C;
+      
+      size_t SIZE_A = sizeof(T) * a->rows * a->cols;
+      size_t SIZE_B = sizeof(T) * b->rows * b->cols;
+      size_t SIZE_C = sizeof(T) * this->rows * this->cols;
+     
+      enter_context("gemm-memcpy");
+      CUDA_CHECK(cudaMalloc(&d_A,SIZE_A));
+      cudaMalloc(&d_B,SIZE_B);
+      cudaMalloc(&d_C,SIZE_C);
+      
+      cudaMemcpy(d_A,a->const_ptr(),SIZE_A,cudaMemcpyHostToDevice);
+      cudaMemcpy(d_B,b->const_ptr(),SIZE_B,cudaMemcpyHostToDevice);
+      if (beta != T(0)) {
+          CUDA_CHECK(cudaMemcpy(d_C, this->const_ptr(), SIZE_C, cudaMemcpyHostToDevice));
+      }
+      leave_context();
+      
+      enter_context("gemm-cublas");
+      proxy_cuda::gemm(transA, transB, aRows, n, k, 
+                       alpha, d_A, a->lda, 
+                       d_B, b->lda, beta, 
+                       d_C, this->lda);
+      cudaDeviceSynchronize();
+      leave_context();
+                       
+      enter_context("gemm-memcpy");
+      cudaMemcpy(this->m,d_C,SIZE_C,cudaMemcpyDeviceToHost); 
+      
+      
+      cudaFree(d_A);
+      cudaFree(d_B);
+      cudaFree(d_C);
+      leave_context();
+      return;
+    }
+  #endif
+  
+
+
+  if (n > 1 || transB != 'N'){
+    
+    enter_context("cblasgemm");
     proxy_cblas::gemm(transA, transB, aRows, n, k, alpha, a->const_ptr(), a->lda, b->const_ptr(), b->lda,
                       beta, this->ptr(), this->lda);
+    leave_context();
+    
+    }
   else
     proxy_cblas::gemv(transA, a->rows, a->cols, alpha, a->const_ptr(), a->lda, b->const_ptr(), 1, beta, this->ptr(), 1);
 }

@@ -144,7 +144,77 @@ namespace hmat {
 }  // end namespace hmat
 
 namespace proxy_cuda {
+  // GEMM computes a matrix-matrix multiplication: C = alpha * A * B + beta * C
+  // https://docs.nvidia.com/cuda/archive/12.6.0/cublas/index.html#cublas-t-gemm
+  template <typename T>
+  void gemm(char transA, char transB, int m, int n, int k,
+            T alpha, const T *a_gpu, int lda,
+            const T *b_gpu, int ldb, T beta,
+            T *c_gpu, int ldc);
 
+  
+  template <>
+  inline void gemm<hmat::S_t>(char transA, char transB, int m, int n, int k,
+                             hmat::S_t alpha, const hmat::S_t *a_gpu, int lda,
+                             const hmat::S_t *b_gpu, int ldb, hmat::S_t beta,
+                             hmat::S_t *c_gpu, int ldc) {
+    cublasHandle_t handle = hmat::CudaManager::getInstance().getCublasHandle();
+    cublasOperation_t opA = (transA == 'N') ? CUBLAS_OP_N : (transA == 'T' ? CUBLAS_OP_T : CUBLAS_OP_C);
+    cublasOperation_t opB = (transB == 'N') ? CUBLAS_OP_N : (transB == 'T' ? CUBLAS_OP_T : CUBLAS_OP_C);
+    CUBLAS_CHECK(cublasSgemm(handle, opA, opB, m, n, k, &alpha, a_gpu, lda, b_gpu, ldb, &beta, c_gpu, ldc));
+    
+  }
+
+  template <>
+  inline void gemm<hmat::D_t>(char transA, char transB, int m, int n, int k,
+                             hmat::D_t alpha, const hmat::D_t *a_gpu, int lda,
+                             const hmat::D_t *b_gpu, int ldb, hmat::D_t beta,
+                             hmat::D_t *c_gpu, int ldc) {
+    cublasHandle_t handle = hmat::CudaManager::getInstance().getCublasHandle();
+    cublasOperation_t opA = (transA == 'N') ? CUBLAS_OP_N : (transA == 'T' ? CUBLAS_OP_T : CUBLAS_OP_C);
+    cublasOperation_t opB = (transB == 'N') ? CUBLAS_OP_N : (transB == 'T' ? CUBLAS_OP_T : CUBLAS_OP_C);
+    CUBLAS_CHECK(cublasDgemm(handle, opA, opB, m, n, k, &alpha, a_gpu, lda, b_gpu, ldb, &beta, c_gpu, ldc));
+    
+  }
+
+ 
+  template <>
+  inline void gemm<hmat::C_t>(char transA, char transB, int m, int n, int k,
+                             hmat::C_t alpha, const hmat::C_t *a_gpu, int lda,
+                             const hmat::C_t *b_gpu, int ldb, hmat::C_t beta,
+                             hmat::C_t *c_gpu, int ldc) {
+    cublasHandle_t handle = hmat::CudaManager::getInstance().getCublasHandle();
+    cublasOperation_t opA = (transA == 'N') ? CUBLAS_OP_N : (transA == 'T' ? CUBLAS_OP_T : CUBLAS_OP_C);//la façon de lire la matrice  normal ou transposé ou conjugate("complexe")
+    cublasOperation_t opB = (transB == 'N') ? CUBLAS_OP_N : (transB == 'T' ? CUBLAS_OP_T : CUBLAS_OP_C);
+    CUBLAS_CHECK(cublasCgemm(handle, opA, opB, m, n, k, 
+                             reinterpret_cast<const cuComplex*>(&alpha), 
+                             reinterpret_cast<const cuComplex*>(a_gpu), lda, 
+                             reinterpret_cast<const cuComplex*>(b_gpu), ldb, 
+                             reinterpret_cast<const cuComplex*>(&beta), 
+                             reinterpret_cast<cuComplex*>(c_gpu), ldc));
+    
+  }
+
+ 
+  template <>
+  inline void gemm<hmat::Z_t>(char transA, char transB, int m, int n, int k,
+                             hmat::Z_t alpha, const hmat::Z_t *a_gpu, int lda,
+                             const hmat::Z_t *b_gpu, int ldb, hmat::Z_t beta,
+                             hmat::Z_t *c_gpu, int ldc) {
+    cublasHandle_t handle = hmat::CudaManager::getInstance().getCublasHandle();
+    cublasOperation_t opA = (transA == 'N') ? CUBLAS_OP_N : (transA == 'T' ? CUBLAS_OP_T : CUBLAS_OP_C);
+    cublasOperation_t opB = (transB == 'N') ? CUBLAS_OP_N : (transB == 'T' ? CUBLAS_OP_T : CUBLAS_OP_C);
+    CUBLAS_CHECK(cublasZgemm(handle, opA, opB, m, n, k, 
+                             reinterpret_cast<const cuDoubleComplex*>(&alpha), 
+                             reinterpret_cast<const cuDoubleComplex*>(a_gpu), lda, 
+                             reinterpret_cast<const cuDoubleComplex*>(b_gpu), ldb, 
+                             reinterpret_cast<const cuDoubleComplex*>(&beta), 
+                             reinterpret_cast<cuDoubleComplex*>(c_gpu), ldc));
+    
+                      
+  }
+
+//-----------------------------------------------------------------------------------------------------------------------------------------------//
   // GEQRF computes a QR factorization of a m-by-n matrix A = Q * R.
   // A is overwritten by Q, Ra and tau are returned in arrays allocated in this routine.
   // https://docs.nvidia.com/cuda/archive/12.6.0/cusolver/index.html#cusolverdn-t-geqrf
