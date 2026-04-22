@@ -420,7 +420,7 @@ void ScalarArray<T>::gemm(char transA, char transB, T alpha,
   assert(b->lda > 0);
 
   #ifdef HAVE_CUDA
-    if(hmat::CudaManager::getInstance().getCudaDeviceCount()){ //je vais changer les valeurs aprés en fct des résultat 
+    if(hmat::CudaManager::getInstance().getCudaDeviceCount()){
       hmat::CudaManager::getInstance().setCudaDevice(); 
     
       T *d_A, *d_B, *d_C;
@@ -731,7 +731,39 @@ template<typename T> void ScalarArray<T>::luDecomposition(int *pivots) {
     const size_t adds = _m * _n *_n / 2 - _n *_n*_n / 6 + _m * _n / 2 + _n / 6;
     increment_flops(Multipliers<T>::add * adds + Multipliers<T>::mul * muls);
   }
+  
+  #ifdef HAVE_CUDA
+  if(hmat::CudaManager::getInstance().getCudaDeviceCount()){ 
+      hmat::CudaManager::getInstance().setCudaDevice(); 
+    T* d_A = nullptr; 
+    int* d_pivots = nullptr; 
+    int k = std::min(rows, cols);
+    size_t sizeA = (size_t)lda * cols * sizeof(T); 
+
+    enter_context("GETRF-tranfert-CPU-GPU");
+    CUDA_CHECK(cudaMalloc(&d_A, sizeA));
+    CUDA_CHECK(cudaMalloc(&d_pivots, sizeof(int) * k));
+    CUDA_CHECK(cudaMemcpy(d_A, this->m, sizeA, cudaMemcpyHostToDevice));
+    leave_context();
+   
+    enter_context("cudagetrf");
+    int info = proxy_cuda::getrf(rows, cols, d_A, lda, d_pivots);
+    leave_context();
+    if (info) throw LapackException("getrf (GPU)", info);
+    
+    enter_context("GETRF-tranfert-GPU-CPU");
+    CUDA_CHECK(cudaMemcpy(this->m, d_A, sizeA, cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(pivots, d_pivots, sizeof(int) * k, cudaMemcpyDeviceToHost));
+    leave_context();
+    cudaFree(d_A);
+    cudaFree(d_pivots);
+    printf("DEBUG: LU factorisation réussie sur GPU\n");
+    return;
+  }
+  #endif
+  enter_context("cpugetrf");
   info = proxy_lapack::getrf(rows, cols, ptr(), lda, pivots);
+  leave_context();
   if (info)
     throw LapackException("getrf", info);
 }
@@ -1175,8 +1207,45 @@ template<typename T>
     const size_t muls = cols * rows * (rows + 1) / 2;
     increment_flops(Multipliers<T>::add * adds + Multipliers<T>::mul * muls);
   }
+  
+  #ifdef HAVE_CUDA
+  if(hmat::CudaManager::getInstance().getCudaDeviceCount()){ 
+      hmat::CudaManager::getInstance().setCudaDevice(); 
+      T *d_A = nullptr; 
+      T *d_B = nullptr; 
+      size_t sizeA = a->memorySize(); 
+      size_t sizeB = this->memorySize(); 
+      enter_context("trsm-tranfert-CPU-GPU");
+      
+      CUDA_CHECK(cudaMalloc(&d_A, sizeA));
+      CUDA_CHECK(cudaMalloc(&d_B, sizeB));
+      
+      CUDA_CHECK(cudaMemcpy(d_A, a->const_ptr(), sizeA, cudaMemcpyHostToDevice));
+      CUDA_CHECK(cudaMemcpy(d_B, this->const_ptr(), sizeB, cudaMemcpyHostToDevice));
+      leave_context();
+
+      
+      enter_context("gputrsm");
+      proxy_cuda::trsm(to_blas(side), to_blas(uplo), transA, to_blas(diag), 
+                       rows, cols, alpha, d_A, a->lda, d_B, this->lda);
+      leave_context();
+
+      
+      enter_context("trsm-transfert-GPU-CPU");
+      CUDA_CHECK(cudaMemcpy(this->m, d_B, sizeB, cudaMemcpyDeviceToHost));
+      leave_context();
+
+      
+      cudaFree(d_A);
+      cudaFree(d_B);
+      return;
+  }
+  #endif
+  
+  enter_context("cputrsm");
   proxy_cblas::trsm(to_blas(side), to_blas(uplo), transA, to_blas(diag),
     rows, cols, alpha, a->m, a->lda, this->m, this->lda);
+  leave_context();
 }
 
 template<typename T>

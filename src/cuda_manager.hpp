@@ -144,6 +144,164 @@ namespace hmat {
 }  // end namespace hmat
 
 namespace proxy_cuda {
+
+
+
+  
+//TRSM solves the triangular linear system with multiple right-hand-sides
+//https://docs.nvidia.com/cuda/cublas/#cublas-t-trsm
+template <typename T> 
+void trsm(char side, char uplo, char trans, char diag, int m, int n, T alpha, const T *A, int lda, T *B, int ldb);
+template <>
+// S (simple)
+inline void trsm<hmat::S_t>(char side, char uplo, char trans, char diag, int m, int n, 
+                           hmat::S_t alpha, const hmat::S_t *A, int lda, hmat::S_t *B, int ldb) {
+    cublasHandle_t handle = hmat::CudaManager::getInstance().getCublasHandle();
+    cublasSideMode_t s = (side == 'L') ? CUBLAS_SIDE_LEFT : CUBLAS_SIDE_RIGHT;
+    cublasFillMode_t u = (uplo == 'U') ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
+    cublasOperation_t t = (trans == 'N') ? CUBLAS_OP_N : (trans == 'T' ? CUBLAS_OP_T : CUBLAS_OP_C);
+    cublasDiagType_t d = (diag == 'U') ? CUBLAS_DIAG_UNIT : CUBLAS_DIAG_NON_UNIT;
+    //primitive function "trsm " NVIDIA 
+    CUBLAS_CHECK(cublasStrsm(handle, s, u, t, d, m, n, &alpha, A, lda, B, ldb));
+}
+
+// D (double) 
+template <>
+inline void trsm<hmat::D_t>(char side, char uplo, char trans, char diag, int m, int n, 
+                           hmat::D_t alpha, const hmat::D_t *A, int lda, hmat::D_t *B, int ldb) {
+    cublasHandle_t handle = hmat::CudaManager::getInstance().getCublasHandle();
+    cublasSideMode_t s = (side == 'L') ? CUBLAS_SIDE_LEFT : CUBLAS_SIDE_RIGHT;
+    cublasFillMode_t u = (uplo == 'U') ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
+    cublasOperation_t t = (trans == 'N') ? CUBLAS_OP_N : (trans == 'T' ? CUBLAS_OP_T : CUBLAS_OP_C);
+    cublasDiagType_t d = (diag == 'U') ? CUBLAS_DIAG_UNIT : CUBLAS_DIAG_NON_UNIT;
+    CUBLAS_CHECK(cublasDtrsm(handle, s, u, t, d, m, n, &alpha, A, lda, B, ldb));
+}
+
+// C (complex float) 
+template <>
+inline void trsm<hmat::C_t>(char side, char uplo, char trans, char diag, int m, int n, 
+                           hmat::C_t alpha, const hmat::C_t *A, int lda, hmat::C_t *B, int ldb) {
+    cublasHandle_t handle = hmat::CudaManager::getInstance().getCublasHandle();
+    cublasSideMode_t s = (side == 'L') ? CUBLAS_SIDE_LEFT : CUBLAS_SIDE_RIGHT;
+    cublasFillMode_t u = (uplo == 'U') ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
+    cublasOperation_t t = (trans == 'N') ? CUBLAS_OP_N : (trans == 'T' ? CUBLAS_OP_T : CUBLAS_OP_C);
+    cublasDiagType_t d = (diag == 'U') ? CUBLAS_DIAG_UNIT : CUBLAS_DIAG_NON_UNIT;
+    CUBLAS_CHECK(cublasCtrsm(handle, s, u, t, d, m, n, 
+                            reinterpret_cast<const cuComplex*>(&alpha), 
+                            reinterpret_cast<const cuComplex*>(A), lda, 
+                            reinterpret_cast<cuComplex*>(B), ldb));
+}
+
+// Z (complex double)
+template <>
+inline void trsm<hmat::Z_t>(char side, char uplo, char trans, char diag, int m, int n, 
+                           hmat::Z_t alpha, const hmat::Z_t *A, int lda, hmat::Z_t *B, int ldb) {
+    cublasHandle_t handle = hmat::CudaManager::getInstance().getCublasHandle();
+    cublasSideMode_t s = (side == 'L') ? CUBLAS_SIDE_LEFT : CUBLAS_SIDE_RIGHT;
+    cublasFillMode_t u = (uplo == 'U') ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
+    cublasOperation_t t = (trans == 'N') ? CUBLAS_OP_N : (trans == 'T' ? CUBLAS_OP_T : CUBLAS_OP_C);
+    cublasDiagType_t d = (diag == 'U') ? CUBLAS_DIAG_UNIT : CUBLAS_DIAG_NON_UNIT;
+    CUBLAS_CHECK(cublasZtrsm(handle, s, u, t, d, m, n, 
+                            reinterpret_cast<const cuDoubleComplex*>(&alpha), //const c'est pour dire qu'on vas pas modifier sa valeur
+                            reinterpret_cast<const cuDoubleComplex*>(A), lda, //
+                            reinterpret_cast<cuDoubleComplex*>(B), ldb));
+}
+
+
+//GETRF computes the LU factorization of a m*n matrix
+  // https://docs.nvidia.com/cuda/archive/12.6.0/cusolver/index.html#cusolverdn-t-getrf
+ template <typename T> int getrf(int m, int n, T *a_gpu, int lda, int *pivots_gpu);
+ 
+ //  S (Simple) 
+ template <>
+ inline int getrf<hmat::S_t>(int m, int n, hmat::S_t *a_gpu, int lda, int *pivots_gpu) {
+   cusolverDnHandle_t handle = hmat::CudaManager::getInstance().getCusolverHandle();
+   //le code d'erreur 
+   int *info_gpu = nullptr;
+   CUDA_CHECK(cudaMalloc(&info_gpu, sizeof(int)));
+   //workspace
+   int lwork = 0;
+   CUSOLVER_CHECK(cusolverDnSgetrf_bufferSize(handle, m, n, a_gpu, lda, &lwork)); 
+   hmat::S_t *workspace = nullptr;
+   CUDA_CHECK(cudaMalloc(&workspace, sizeof(hmat::S_t) * lwork));
+   CUSOLVER_CHECK(cusolverDnSgetrf(handle, m, n, a_gpu, lda, workspace, pivots_gpu, info_gpu));
+   int host_info = 0;
+   CUDA_CHECK(cudaMemcpy(&host_info, info_gpu, sizeof(int), cudaMemcpyDeviceToHost));
+   printf("s: LU:GETRF done on GPU \n");
+   cudaFree(workspace);
+   cudaFree(info_gpu);
+   return host_info;
+ }
+
+
+ // D(double) 
+ template <>
+ inline int getrf<hmat::D_t>(int m, int n, hmat::D_t *a_gpu, int lda, int *pivots_gpu) {
+   cusolverDnHandle_t handle = hmat::CudaManager::getInstance().getCusolverHandle();
+   int *info_gpu = nullptr;
+   CUDA_CHECK(cudaMalloc(&info_gpu, sizeof(int)));
+   // workspace
+   int lwork = 0;
+   CUSOLVER_CHECK(cusolverDnDgetrf_bufferSize(handle, m, n, a_gpu, lda, &lwork));
+   hmat::D_t *workspace = nullptr;
+   CUDA_CHECK(cudaMalloc(&workspace, sizeof(hmat::D_t) * lwork));
+   CUSOLVER_CHECK(cusolverDnDgetrf(handle, m, n, a_gpu, lda, workspace, pivots_gpu, info_gpu));
+   int host_info = 0;
+   CUDA_CHECK(cudaMemcpy(&host_info, info_gpu, sizeof(int), cudaMemcpyDeviceToHost));
+   printf("d:getrf se fait sur device \n");
+   cudaFree(workspace); 
+   cudaFree(info_gpu);
+   return host_info;
+ }
+
+
+ // C (complexe) 
+ template <>
+ inline int getrf<hmat::C_t>(int m, int n, hmat::C_t *a_gpu, int lda, int *pivots_gpu) {
+   cusolverDnHandle_t handle = hmat::CudaManager::getInstance().getCusolverHandle();
+   int *info_gpu = nullptr;
+   CUDA_CHECK(cudaMalloc(&info_gpu, sizeof(int)));
+   int lwork = 0;
+   CUSOLVER_CHECK(cusolverDnCgetrf_bufferSize(handle, m, n, reinterpret_cast<cuComplex*>(a_gpu), lda, &lwork));
+   hmat::C_t *workspace = nullptr;
+   CUDA_CHECK(cudaMalloc(&workspace, sizeof(hmat::C_t) * lwork));
+   CUSOLVER_CHECK(cusolverDnCgetrf(handle, m, n, reinterpret_cast<cuComplex*>(a_gpu), lda, reinterpret_cast<cuComplex*>(workspace), pivots_gpu, info_gpu));
+   int host_info = 0;
+   CUDA_CHECK(cudaMemcpy(&host_info, info_gpu, sizeof(int), cudaMemcpyDeviceToHost));
+   printf("c:getrf se fait sur device \n");
+   cudaFree(workspace); 
+   cudaFree(info_gpu);
+   return host_info;
+ }
+
+//Z (double complexe)
+template <>
+inline int getrf<hmat::Z_t>(int m, int n, hmat::Z_t *a_gpu, int lda, int *pivots_gpu) {
+  cusolverDnHandle_t handle = hmat::CudaManager::getInstance().getCusolverHandle();
+  if (m <= 0 || n <= 0) return 0;
+  int *info_gpu = nullptr;
+  CUDA_CHECK(cudaMalloc(&info_gpu, sizeof(int)));
+  int lwork = 0;
+  CUSOLVER_CHECK(cusolverDnZgetrf_bufferSize(handle, m, n, 
+                 reinterpret_cast<cuDoubleComplex*>(a_gpu), lda, &lwork));
+  
+  hmat::Z_t *workspace = nullptr;
+  CUDA_CHECK(cudaMalloc(&workspace, sizeof(hmat::Z_t) * lwork));
+  CUSOLVER_CHECK(cusolverDnZgetrf(handle, m, n, 
+                 reinterpret_cast<cuDoubleComplex*>(a_gpu), lda, 
+                 reinterpret_cast<cuDoubleComplex*>(workspace), 
+                 pivots_gpu, info_gpu));
+
+  int host_info = 0;
+  CUDA_CHECK(cudaMemcpy(&host_info, info_gpu, sizeof(int), cudaMemcpyDeviceToHost));
+  printf("z:getrf se fait sur device \n");
+  
+  cudaFree(workspace);
+  cudaFree(info_gpu);
+  return host_info;
+}
+
+
   // GEMM computes a matrix-matrix multiplication: C = alpha * A * B + beta * C
   // https://docs.nvidia.com/cuda/archive/12.6.0/cublas/index.html#cublas-t-gemm
   template <typename T>
