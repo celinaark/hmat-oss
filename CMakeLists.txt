@@ -86,7 +86,7 @@ option(HMAT_TIMELINE "Enable profiling timeline" OFF)
 # Sources
 file(GLOB_RECURSE HMAT_SOURCES RELATIVE ${PROJECT_SOURCE_DIR} src/*.[ch]pp include/*.h)
 if(ENABLE_CUDA)
-  list(APPEND HMAT_SOURCES ${PROJECT_SOURCE_DIR}/src/rk_matrix.cu)
+  list(APPEND HMAT_SOURCES ${PROJECT_SOURCE_DIR}/src/rk_matrix.cu ${PROJECT_SOURCE_DIR}/src/llt.cu)
 endif(ENABLE_CUDA)
 list(REMOVE_ITEM HMAT_SOURCES src/recursion.cpp) # because it is included in h_matrix.cpp
 if(NOT HMAT_TIMELINE)

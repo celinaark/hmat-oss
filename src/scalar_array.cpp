@@ -887,6 +887,93 @@ void ScalarArray<T>::lltDecomposition() {
         }
     }
 }
+/*template<typename T>
+void ScalarArray<T>::lltDecomposition() {
+  assert(rows == cols); // We expect a square matrix
+
+  int n = rows;
+  const size_t n2 = (size_t) n*n;
+  const size_t n3 = n2 * n;
+  const size_t muls = n3 / 6 + n2 / 2 + n / 3;
+  const size_t adds = n3 / 6 - n / 6;
+  increment_flops(Multipliers<T>::add * adds + Multipliers<T>::mul * muls);
+
+  if(hmat::Types<T>::IS_REAL::value) {
+    
+    #ifdef HAVE_CUDA
+    this->ensure_host(); // On s'assure que  les données sont sur le CPU 
+    #endif
+
+    int info = proxy_lapack::potrf('L', rows, m, lda);
+    if(info != 0)
+      assertPositive(T(-1), info, "potrf");
+
+    #ifdef HAVE_CUDA
+    this->state = HOST; // Le CPU a modifié la matrice
+    #endif
+
+  } else {
+    // Cas Complexe
+   #ifdef HAVE_CUDA
+    if (hmat::CudaManager::getInstance().getCudaDeviceCount() > 0) {
+        hmat::CudaManager::getInstance().setCudaDevice();
+        
+        // vers le GPU
+        this->ensure_device();
+
+        //  Calcul sur GPU 
+        if (sizeof(T) == sizeof(C_t)){
+            enter_context("lltCONGPU");      
+            
+            llt_complex_cuda_C((void*)this->d_m, n, lda); 
+            leave_context();
+        } else {  
+            enter_context("lltZONGPU");
+            llt_complex_cuda_Z((void*)this->d_m, n, lda);
+            printf("par là");
+            leave_context();
+        }
+        
+        CUDA_CHECK(cudaDeviceSynchronize());
+
+        
+        this->mark_modified();
+        
+        
+        this->ensure_host(); 
+    } else {
+    #endif
+        
+        enter_context("lltONCPU");
+        for (int j = 0; j < n; j++) {
+          for (int k = 0; k < j; k++)
+            get(j,j) -= get(j,k) * get(j,k);
+          assertPositive(get(j, j), j, "lltDecomposition");
+
+          get(j,j) = std::sqrt(get(j,j));
+
+          for (int k = 0; k < j; k++)
+            for (int i = j+1; i < n; i++)
+              get(i,j) -= get(i,k) * get(j,k);
+
+          for (int i = j+1; i < n; i++) {
+            get(i,j) /= get(j,j);
+          }
+        }
+        leave_context();
+    #ifdef HAVE_CUDA
+    }
+    #endif
+  }
+
+  
+  for (int j = 0; j < n; j++) {
+        for(int i = 0; i < j; i++) {
+            get(i,j) = T(0);
+        }
+  }
+}*/
+
 
 // Helper functions for solveTriangular
 inline char to_blas(const Side side) {
