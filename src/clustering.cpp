@@ -235,6 +235,52 @@ GeometricBisectionAlgorithm::partition(ClusterTree& current, std::vector<Cluster
   return dim;
 }
 
+int
+MedianBisectionAlgorithm::partition(ClusterTree& current, std::vector<ClusterTree*>& children,
+                                    int currentAxis) const
+{
+  int dim = largestDimension(current, currentAxis);
+  sortByDimension(current, dim);
+  int previousIndex = 0;
+  // Loop on 'divider_' = the number of children created
+  for (int i=1 ; i<divider_ ; i++) {
+    int middleIndex = current.data.size() * i / divider_;
+    if (NULL != current.data.group_index())
+    {
+      // Ensure that we do not split inside a group
+      const int* group_index = current.data.group_index() + current.data.offset();
+      const int group(group_index[middleIndex]);
+      if (group_index[middleIndex-1] == group)
+      {
+        int upper = middleIndex;
+        int lower = middleIndex-1;
+        while (upper < current.data.size() && group_index[upper] == group)
+          ++upper;
+        while (lower >= 0 && group_index[lower] == group)
+          --lower;
+        if (lower < 0 && upper == current.data.size())
+        {
+          // All degrees of freedom belong to the same group, this is fine
+        }
+        else if (lower < 0)
+          middleIndex = upper;
+        else if (upper == current.data.size())
+          middleIndex = lower + 1;
+        else if (upper + lower < 2 * middleIndex)
+          middleIndex = upper;
+        else
+          middleIndex = lower + 1;
+      }
+    }
+    if (middleIndex > previousIndex)
+      children.push_back(current.slice(current.data.offset()+previousIndex, middleIndex-previousIndex));
+    previousIndex = middleIndex;
+  }
+  // Add the last child
+  if (current.data.size() - previousIndex >0)
+    children.push_back(current.slice(current.data.offset()+ previousIndex, current.data.size() - previousIndex));
+  return dim;
+}
 
 /* 
    Partition the cluster using a median bisection approach with optional grid alignment.
@@ -312,7 +358,85 @@ MedianBisectionAlgorithm::partition(ClusterTree& current, std::vector<ClusterTre
     
   return dim;
 }
+/* int MedianBisectionAlgorithm::partition(ClusterTree& current, std::vector<ClusterTree*>& children,
+                                    int currentAxis) const
+{
+  
+  int dim = largestDimension(current, currentAxis);
+  
+  
+  sortByDimension(current, dim);
+  
+  int previousIndex = 0;
+  int totalSize = current.data.size();
+  int imposedSize = getLeafSize(); 
 
+  
+  for (int i=1 ; i<divider_ ; i++) {
+    
+    int rawMiddle = totalSize * i / divider_;
+    int middleIndex = rawMiddle;
+
+    
+    if (imposedSize > 0 && totalSize > imposedSize) {
+        
+        int n = 0;
+        while ((imposedSize << (n + 1)) <= totalSize) {
+            n++;
+        }
+        
+        
+        int powerOfTwoAligned = (imposedSize << n);
+
+        
+        if (powerOfTwoAligned > 0 && powerOfTwoAligned < totalSize) {
+            middleIndex = powerOfTwoAligned;
+        }
+    }
+    
+    
+    if (NULL != current.data.group_index())
+    {
+      
+      const int* group_index = current.data.group_index() + current.data.offset();
+      const int group(group_index[middleIndex]);
+      
+      if (group_index[middleIndex-1] == group)
+      {
+        int upper = middleIndex;
+        int lower = middleIndex-1;
+        while (upper < current.data.size() && group_index[upper] == group)
+          ++upper;
+        while (lower >= 0 && group_index[lower] == group)
+          --lower;
+          
+        if (lower < 0 && upper == current.data.size()) 
+        { 
+            
+        }
+        else if (lower < 0) 
+          middleIndex = upper;
+        else if (upper == current.data.size()) 
+          middleIndex = lower + 1;
+        else if (upper + lower < 2 * middleIndex)
+           middleIndex = upper;
+        else 
+           middleIndex = lower + 1;
+      }
+    }
+
+    
+    if (middleIndex > previousIndex)
+      children.push_back(current.slice(current.data.offset()+previousIndex, middleIndex-previousIndex));
+    previousIndex = middleIndex;
+  }
+  
+  
+  if (current.data.size() > previousIndex)
+    children.push_back(current.slice(current.data.offset()+ previousIndex, current.data.size() - previousIndex));
+    
+  return dim;
+}*/
 int
 HybridBisectionAlgorithm::partition(ClusterTree& current, std::vector<ClusterTree*>& children,
                                     int currentAxis) const
