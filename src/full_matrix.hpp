@@ -113,6 +113,7 @@ public:
   /** This <- 0.
    */
   void clear();
+  void ensure_device() const;
   /** \brief Returns number of allocated zeros
    */
   size_t storedZeros() const;

@@ -72,6 +72,7 @@ template<typename T> class RkMatrix {
    */
   void mGSTruncate(double epsilon, int initialPivotA=0, int initialPivotB=0);
 public:
+void ensure_device() const;
   /** @brief A hook which can be called at the begining of formatedAddParts */
   static bool (*formatedAddPartsHook)(RkMatrix<T> * me, double epsilon, const T* alpha, const RkMatrix<T>* const * parts, const int n);
   const IndexSet *rows;

@@ -68,6 +68,16 @@ template<typename T> RkMatrix<T>::RkMatrix(ScalarArray<T>* _a, const IndexSet* _
 template<typename T> RkMatrix<T>::~RkMatrix() {
   clear();
 }
+template<typename T> void RkMatrix<T>::ensure_device() const {
+#ifdef HAVE_CUDA
+  if (a != nullptr) {
+    a->ensure_device();
+  }
+  if (b != nullptr) {
+    b->ensure_device();
+  }
+#endif
+}
 
 
 template<typename T> ScalarArray<T>* RkMatrix<T>::evalArray(ScalarArray<T>* result) const {

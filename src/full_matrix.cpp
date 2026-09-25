@@ -104,6 +104,15 @@ template<typename T> void FullMatrix<T>::clear() {
   if (diagonal)
     diagonal->clear();
 }
+template<typename T> void FullMatrix<T>::ensure_device() const {
+#ifdef HAVE_CUDA
+  
+  data.ensure_device();
+  if (diagonal != nullptr) {
+    diagonal->ensure_device();
+  }
+#endif
+}
 
 template<typename T> size_t FullMatrix<T>::storedZeros() const {
   return data.storedZeros();
