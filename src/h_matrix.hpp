@@ -159,6 +159,9 @@ template<typename T> class HMatrix : public Tree<HMatrix<T> >, public RecursionM
    */
   void axpy(T alpha, const FullMatrix<T>* b);
 public:
+  #ifdef HAVE_CUDA
+   void ensure_device() const;
+  #endif
   /*! \brief Create a HMatrix based on a row and column ClusterTree.
 
     \param _rows The row cluster tree

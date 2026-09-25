@@ -2929,6 +2929,27 @@ template<typename T> void HMatrix<T>::temporary(bool b) {
   }
 }
 
+#ifdef HAVE_CUDA
+template<typename T>
+void HMatrix<T>::ensure_device() const {
+  
+  if (this->isLeaf() && isAssembled() && !isNull()) {
+    if (isRkMatrix()) {
+      if (rk()) rk()->ensure_device();
+    } else {
+      if (full()) full()->ensure_device();
+    }
+  } 
+  else if (!this->isLeaf()) {
+    for (int i = 0; i < this->nrChild(); i++) {
+      const HMatrix<T> *child = this->getChild(i);
+      if (child) {
+        child->ensure_device();
+      }
+    }
+  }
+}
+#endif
 // Templates declaration
 template class HMatrix<S_t>;
 template class HMatrix<D_t>;
