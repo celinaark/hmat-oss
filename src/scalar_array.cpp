@@ -65,6 +65,7 @@
 
 #ifdef HAVE_CUDA
 #include "cuda_manager.hpp"
+#include "llt.hpp"
 #endif
 namespace {
 struct EnvVarSA {
@@ -176,9 +177,82 @@ int convert_factorization_to_int(Factorization f) {
 }
 
 /** ScalarArray */
+
+
+#ifdef HAVE_CUDA
+template<typename T>
+void ScalarArray<T>::ensure_device() const {
+    if (rows <= 0 || cols <= 0) return; 
+    if (state == DEVICE || state == SYNCED) return; 
+
+    if (hmat::CudaManager::getInstance().getCudaDeviceCount() > 0) {
+        hmat::CudaManager::getInstance().setCudaDevice();
+    }
+
+    size_t total_bytes = (size_t)lda * (size_t)cols * sizeof(T);
+
+    if (d_m == nullptr) { 
+        CUDA_CHECK(cudaMalloc(&d_m, total_bytes));
+    }
+    
+    enter_context("Memcpy-HostToDevice");
+    if (m != nullptr && d_m != nullptr) {
+        if (lda == rows) {
+            size_t contig_size = (size_t)rows * (size_t)cols * sizeof(T);
+            CUDA_CHECK(cudaMemcpy(d_m, m, contig_size, cudaMemcpyHostToDevice));
+        } else {
+            for (int j = 0; j < cols; j++) {
+                CUDA_CHECK(cudaMemcpy(d_m + (size_t)j * lda, m + (size_t)j * lda, 
+                                      (size_t)rows * sizeof(T), cudaMemcpyHostToDevice));
+            }
+        }
+    }
+    leave_context();
+    state = SYNCED; 
+}
+
+template<typename T>
+void ScalarArray<T>::ensure_host() const {
+    if (rows <= 0 || cols <= 0) return; 
+    if (state == HOST || state == SYNCED) return; 
+
+    if (hmat::CudaManager::getInstance().getCudaDeviceCount() > 0) {
+        hmat::CudaManager::getInstance().setCudaDevice();
+    }
+
+    if (d_m != nullptr && m != nullptr) {
+        enter_context("Memcpy-DeviceToHost");
+        if (lda == rows) {
+            size_t contig_size = (size_t)rows * (size_t)cols * sizeof(T);
+            CUDA_CHECK(cudaMemcpy(m, d_m, contig_size, cudaMemcpyDeviceToHost));
+        } else {
+            for (int j = 0; j < cols; j++) {
+                CUDA_CHECK(cudaMemcpy(m + (size_t)j * lda, d_m + (size_t)j * lda, 
+                                      (size_t)rows * sizeof(T), cudaMemcpyDeviceToHost));
+            }
+        }
+        leave_context();
+    }
+    state = SYNCED; 
+}
+
+template<typename T>
+void ScalarArray<T>::mark_modified() {
+    state = DEVICE;
+}
+
+template<typename T>
+void ScalarArray<T>::mark_host_modified() {
+    state = HOST;
+}
+#endif
 template<typename T>
 ScalarArray<T>::ScalarArray(T* _m, int _rows, int _cols, int _lda)
   : ownsMemory(false), m(_m), rows(_rows), cols(_cols), lda(_lda) {
+    #ifdef HAVE_CUDA
+     this->d_m = nullptr; 
+     this->state = HOST;
+    #endif
   if (lda == -1) {
     lda = rows;
   }
@@ -192,6 +266,10 @@ ScalarArray<T>::ScalarArray(T* _m, int _rows, int _cols, int _lda)
 template<typename T>
 ScalarArray<T>::ScalarArray(int _rows, int _cols, bool initzero)
   : ownsMemory(true), ownsFlag(true), rows(_rows), cols(_cols), lda(_rows) {
+   #ifdef HAVE_CUDA
+    this->d_m = nullptr; 
+    this->state = HOST;
+   #endif
   size_t size = sizeof(T) * rows * cols;
   if(size == 0) {
     m = nullptr;
@@ -213,6 +291,16 @@ ScalarArray<T>::ScalarArray(int _rows, int _cols, bool initzero)
 }
 
 template<typename T> ScalarArray<T>::~ScalarArray() {
+
+  #ifdef HAVE_CUDA
+  if (d_m != nullptr) {
+      if (hmat::CudaManager::getInstance().getCudaDeviceCount() > 0) {
+          hmat::CudaManager::getInstance().setCudaDevice();
+      }
+      cudaFree(d_m);
+      d_m = nullptr;
+  }
+#endif
   if (ownsMemory) {
     size_t size = ((size_t) rows) * cols * sizeof(T);
     MemoryInstrumenter::instance().free(size, MemoryInstrumenter::FULL_MATRIX);
@@ -255,6 +343,16 @@ template<typename T> void ScalarArray<T>::clear() {
   assert(lda == rows);
   std::fill(m, m + ((size_t) rows) * cols, 0);
   setOrtho(1); // we dont use ptr(): buffer filled with 0 is orthogonal
+#ifdef HAVE_CUDA
+  if (d_m != nullptr) {
+      if (hmat::CudaManager::getInstance().getCudaDeviceCount() > 0) {
+          hmat::CudaManager::getInstance().setCudaDevice();
+      }
+      cudaFree(d_m);
+      d_m = nullptr;
+  }
+  state = HOST; 
+#endif
 }
 
 template<typename T> size_t ScalarArray<T>::storedZeros() const {
@@ -299,6 +397,9 @@ template<typename T> void ScalarArray<T>::scale(T alpha) {
     }
   }
   if (alpha == T(0)) setOrtho(1); // buffer filled with 0 is orthogonal
+  #ifdef HAVE_CUDA
+      state = HOST; 
+  #endif
 }
 
 template<typename T> void ScalarArray<T>::transpose() {
@@ -329,6 +430,16 @@ template<typename T> void ScalarArray<T>::transpose() {
     delete(tmp);
   }
 #endif
+#ifdef HAVE_CUDA
+  if (d_m != nullptr) {
+      if (hmat::CudaManager::getInstance().getCudaDeviceCount() > 0) {
+          hmat::CudaManager::getInstance().setCudaDevice();
+      }
+      cudaFree(d_m);
+      d_m = nullptr;
+  }
+  state = HOST;
+#endif
 }
 
 template<typename T> void ScalarArray<T>::conjugate() {
@@ -349,6 +460,9 @@ template<typename T> void ScalarArray<T>::conjugate() {
       x += lda;
     }
   }
+  #ifdef HAVE_CUDA
+    state = HOST;
+  #endif
 }
 
 template<typename T> ScalarArray<T>* ScalarArray<T>::copy(ScalarArray<T>* result) const {
@@ -423,39 +537,31 @@ void ScalarArray<T>::gemm(char transA, char transB, T alpha,
     if(hmat::CudaManager::getInstance().getCudaDeviceCount()){
       hmat::CudaManager::getInstance().setCudaDevice(); 
     
-      T *d_A, *d_B, *d_C;
-      
-      size_t SIZE_A = sizeof(T) * a->rows * a->cols;
-      size_t SIZE_B = sizeof(T) * b->rows * b->cols;
-      size_t SIZE_C = sizeof(T) * this->rows * this->cols;
      
-      enter_context("gemm-memcpy");
-      CUDA_CHECK(cudaMalloc(&d_A,SIZE_A));
-      cudaMalloc(&d_B,SIZE_B);
-      cudaMalloc(&d_C,SIZE_C);
+      a->ensure_device();
+      b->ensure_device();
       
-      cudaMemcpy(d_A,a->const_ptr(),SIZE_A,cudaMemcpyHostToDevice);
-      cudaMemcpy(d_B,b->const_ptr(),SIZE_B,cudaMemcpyHostToDevice);
+      //leave_context();
       if (beta != T(0)) {
-          CUDA_CHECK(cudaMemcpy(d_C, this->const_ptr(), SIZE_C, cudaMemcpyHostToDevice));
+          
+          this->ensure_device();
+      } else {
+          
+          if (this->d_m == nullptr) {
+              size_t total_bytes = (size_t)this->lda * (size_t)this->cols * sizeof(T);
+              CUDA_CHECK(cudaMalloc(&this->d_m, total_bytes));
+          }
       }
-      leave_context();
-      
       enter_context("gemm-cublas");
       proxy_cuda::gemm(transA, transB, aRows, n, k, 
-                       alpha, d_A, a->lda, 
-                       d_B, b->lda, beta, 
-                       d_C, this->lda);
-      cudaDeviceSynchronize();
-      leave_context();
-                       
-      enter_context("gemm-memcpy");
-      cudaMemcpy(this->m,d_C,SIZE_C,cudaMemcpyDeviceToHost); 
-      
-      
-      cudaFree(d_A);
-      cudaFree(d_B);
-      cudaFree(d_C);
+                       alpha, a->d_m, a->lda, 
+                       b->d_m, b->lda, beta, 
+                       this->d_m, this->lda);
+    
+      //cudaDeviceSynchronize();
+      this->mark_modified();
+      this->ensure_host();
+
       leave_context();
       return;
     }
@@ -735,29 +841,20 @@ template<typename T> void ScalarArray<T>::luDecomposition(int *pivots) {
   #ifdef HAVE_CUDA
   if(hmat::CudaManager::getInstance().getCudaDeviceCount()){ 
       hmat::CudaManager::getInstance().setCudaDevice(); 
-    T* d_A = nullptr; 
     int* d_pivots = nullptr; 
     int k = std::min(rows, cols);
-    size_t sizeA = (size_t)lda * cols * sizeof(T); 
-
-    enter_context("GETRF-tranfert-CPU-GPU");
-    CUDA_CHECK(cudaMalloc(&d_A, sizeA));
+    this->ensure_device();
     CUDA_CHECK(cudaMalloc(&d_pivots, sizeof(int) * k));
-    CUDA_CHECK(cudaMemcpy(d_A, this->m, sizeA, cudaMemcpyHostToDevice));
-    leave_context();
    
     enter_context("cudagetrf");
-    int info = proxy_cuda::getrf(rows, cols, d_A, lda, d_pivots);
+    int info = proxy_cuda::getrf(rows, cols, this->d_m, lda, d_pivots);
     leave_context();
     if (info) throw LapackException("getrf (GPU)", info);
     
-    enter_context("GETRF-tranfert-GPU-CPU");
-    CUDA_CHECK(cudaMemcpy(this->m, d_A, sizeA, cudaMemcpyDeviceToHost));
     CUDA_CHECK(cudaMemcpy(pivots, d_pivots, sizeof(int) * k, cudaMemcpyDeviceToHost));
-    leave_context();
-    cudaFree(d_A);
     cudaFree(d_pivots);
-    printf("DEBUG: LU factorisation réussie sur GPU\n");
+    this->mark_modified();
+    this->ensure_host();
     return;
   }
   #endif
@@ -864,6 +961,38 @@ void ScalarArray<T>::lltDecomposition() {
     if(info != 0)
       assertPositive(T(-1), info, "potrf");
   } else {
+   #ifdef HAVE_CUDA
+    if (hmat::CudaManager::getInstance().getCudaDeviceCount()) {
+        hmat::CudaManager::getInstance().setCudaDevice();
+        T* d_A = nullptr;
+        size_t sizeA = (size_t)lda * n * sizeof(T);
+        enter_context("llt-transfert-CPU-GPU");
+        CUDA_CHECK(cudaMalloc(&d_A, sizeA));
+        CUDA_CHECK(cudaMemcpy(d_A, m, sizeA, cudaMemcpyHostToDevice));
+        leave_context();
+        if (sizeof(T) == sizeof(C_t)){
+            
+            enter_context("lltCONGPU");      
+            llt_complex_cuda_C(d_A, n, lda);
+            leave_context();}
+        else{  
+            
+            enter_context("lltZONGPU");
+            llt_complex_cuda_Z(reinterpret_cast<Z_t*>(d_A), n, lda);
+            leave_context();}
+        
+        enter_context("llt-transfert-GPU-CPU");
+        CUDA_CHECK(cudaMemcpy(m, d_A, sizeA, cudaMemcpyDeviceToHost));
+        cudaFree(d_A);
+        leave_context();
+        for (int j = 0; j < n; j++)
+            for (int i = 0; i < j; i++)
+                get(i, j) = T(0);   
+        return;
+    }
+    #endif
+    
+    enter_context("lltONCPU");
     for (int j = 0; j < n; j++) {
       for (int k = 0; k < j; k++)
         get(j,j) -= get(j,k) * get(j,k);
@@ -879,6 +1008,7 @@ void ScalarArray<T>::lltDecomposition() {
         get(i,j) /= get(j,j);
       }
     }
+    leave_context();
   }
 
   for (int j = 0; j < n; j++) {
@@ -887,92 +1017,6 @@ void ScalarArray<T>::lltDecomposition() {
         }
     }
 }
-/*template<typename T>
-void ScalarArray<T>::lltDecomposition() {
-  assert(rows == cols); // We expect a square matrix
-
-  int n = rows;
-  const size_t n2 = (size_t) n*n;
-  const size_t n3 = n2 * n;
-  const size_t muls = n3 / 6 + n2 / 2 + n / 3;
-  const size_t adds = n3 / 6 - n / 6;
-  increment_flops(Multipliers<T>::add * adds + Multipliers<T>::mul * muls);
-
-  if(hmat::Types<T>::IS_REAL::value) {
-    
-    #ifdef HAVE_CUDA
-    this->ensure_host(); // On s'assure que  les données sont sur le CPU 
-    #endif
-
-    int info = proxy_lapack::potrf('L', rows, m, lda);
-    if(info != 0)
-      assertPositive(T(-1), info, "potrf");
-
-    #ifdef HAVE_CUDA
-    this->state = HOST; // Le CPU a modifié la matrice
-    #endif
-
-  } else {
-    // Cas Complexe
-   #ifdef HAVE_CUDA
-    if (hmat::CudaManager::getInstance().getCudaDeviceCount() > 0) {
-        hmat::CudaManager::getInstance().setCudaDevice();
-        
-        // vers le GPU
-        this->ensure_device();
-
-        //  Calcul sur GPU 
-        if (sizeof(T) == sizeof(C_t)){
-            enter_context("lltCONGPU");      
-            
-            llt_complex_cuda_C((void*)this->d_m, n, lda); 
-            leave_context();
-        } else {  
-            enter_context("lltZONGPU");
-            llt_complex_cuda_Z((void*)this->d_m, n, lda);
-            printf("par là");
-            leave_context();
-        }
-        
-        CUDA_CHECK(cudaDeviceSynchronize());
-
-        
-        this->mark_modified();
-        
-        
-        this->ensure_host(); 
-    } else {
-    #endif
-        
-        enter_context("lltONCPU");
-        for (int j = 0; j < n; j++) {
-          for (int k = 0; k < j; k++)
-            get(j,j) -= get(j,k) * get(j,k);
-          assertPositive(get(j, j), j, "lltDecomposition");
-
-          get(j,j) = std::sqrt(get(j,j));
-
-          for (int k = 0; k < j; k++)
-            for (int i = j+1; i < n; i++)
-              get(i,j) -= get(i,k) * get(j,k);
-
-          for (int i = j+1; i < n; i++) {
-            get(i,j) /= get(j,j);
-          }
-        }
-        leave_context();
-    #ifdef HAVE_CUDA
-    }
-    #endif
-  }
-
-  
-  for (int j = 0; j < n; j++) {
-        for(int i = 0; i < j; i++) {
-            get(i,j) = T(0);
-        }
-  }
-}*/
 
 
 // Helper functions for solveTriangular
@@ -1298,33 +1342,19 @@ template<typename T>
   #ifdef HAVE_CUDA
   if(hmat::CudaManager::getInstance().getCudaDeviceCount()){ 
       hmat::CudaManager::getInstance().setCudaDevice(); 
-      T *d_A = nullptr; 
-      T *d_B = nullptr; 
-      size_t sizeA = a->memorySize(); 
-      size_t sizeB = this->memorySize(); 
-      enter_context("trsm-tranfert-CPU-GPU");
-      
-      CUDA_CHECK(cudaMalloc(&d_A, sizeA));
-      CUDA_CHECK(cudaMalloc(&d_B, sizeB));
-      
-      CUDA_CHECK(cudaMemcpy(d_A, a->const_ptr(), sizeA, cudaMemcpyHostToDevice));
-      CUDA_CHECK(cudaMemcpy(d_B, this->const_ptr(), sizeB, cudaMemcpyHostToDevice));
-      leave_context();
-
+            a->ensure_device();
+      this->ensure_device();
       
       enter_context("gputrsm");
       proxy_cuda::trsm(to_blas(side), to_blas(uplo), transA, to_blas(diag), 
-                       rows, cols, alpha, d_A, a->lda, d_B, this->lda);
+                       rows, cols, alpha, a->d_m, a->lda, this->d_m, this->lda);
+
       leave_context();
 
       
-      enter_context("trsm-transfert-GPU-CPU");
-      CUDA_CHECK(cudaMemcpy(this->m, d_B, sizeB, cudaMemcpyDeviceToHost));
-      leave_context();
-
-      
-      cudaFree(d_A);
-      cudaFree(d_B);
+    
+      this->mark_modified();
+      this->ensure_host();
       return;
   }
   #endif
@@ -1659,6 +1689,9 @@ template<typename T> void ScalarArray<T>::addIdentity(T alpha) {
   for(int i = 0; i < n; i++) {
     get(i, i) += alpha;
   }
+  #ifdef HAVE_CUDA
+     state = HOST; 
+  #endif
 }
 
 template<typename T> typename Types<T>::dp ScalarArray<T>::diagonalProduct() const {

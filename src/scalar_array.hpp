@@ -26,7 +26,7 @@
   \brief Scalar Array type used by the HMatrix library.
 */
 #pragma once
-
+#include "config.h"
 #include <cstddef>
 #include "assert.h"
 #include "data_types.hpp"
@@ -107,6 +107,16 @@ public:
   /*! Leading dimension, as in BLAS */
   int lda;
 
+#ifdef HAVE_CUDA
+  enum SyncState { HOST, DEVICE, SYNCED };
+  mutable T* d_m ;          
+  mutable SyncState state ;
+  void ensure_device() const;
+  void ensure_host() const;
+  void mark_modified();
+  void mark_host_modified();
+#endif
+
   /** \brief Initialize the ScalarArray with existing ScalarArray.
 
       In this case the matrix doesn't own the data (the memory is not
@@ -118,7 +128,12 @@ public:
 #ifdef HMAT_SCALAR_ARRAY_ORTHO
     is_ortho(d.is_ortho),
 #endif
-    ownsFlag(false), rows(d.rows), cols(d.cols), lda(d.lda) {}
+    ownsFlag(false), rows(d.rows), cols(d.cols), lda(d.lda) {
+#ifdef HAVE_CUDA
+      this->d_m = nullptr;
+      this->state = HOST;
+#endif
+    }
   /** \brief Initialize the matrix with existing data.
 
       In this case the matrix doesn't own the data (the memory is not
@@ -147,8 +162,12 @@ public:
 #ifdef HMAT_SCALAR_ARRAY_ORTHO
         is_ortho(d.is_ortho),
 #endif
-        ownsFlag(false), rows(rowsSize), cols(colsSize), lda(d.lda) {}
-
+        ownsFlag(false), rows(rowsSize), cols(colsSize), lda(d.lda) {
+ #ifdef HAVE_CUDA
+      this->d_m = nullptr;
+      this->state = HOST;
+#endif
+  }
   ~ScalarArray();
 
   /** This <- 0.
@@ -258,11 +277,18 @@ public:
       There are 2 types to allow matrix modification or not.
    */
   inline T& get(int i=0, int j=0) {
+    #ifdef HAVE_CUDA
+      ensure_host(); 
+      state = HOST;  
+    #endif
     // here I might modify the data with this
     setOrtho(0);
     return m[i + ((size_t) lda) * j];
   }
   inline const T& get(int i=0, int j=0) const {
+    #ifdef HAVE_CUDA
+      ensure_host(); 
+    #endif
     // here this is not supposed to allow content modification (unless casted into non-const)
     return m[i + ((size_t) lda) * j];
   }
@@ -272,11 +298,18 @@ public:
       There are 2 types to allow matrix modification or not (const or not).
    */
   inline T* ptr(int i=0, int j=0) const {
+    #ifdef HAVE_CUDA
+      ensure_host(); 
+      state = HOST; 
+    #endif
     // here I might modify the data with this pointer
     setOrtho(0);
     return &m[i + ((size_t) lda) * j];
   }
   inline const T * const_ptr(int i=0, int j=0) const {
+    #ifdef HAVE_CUDA
+      ensure_host();
+    #endif
     // here this pointer is not supposed to allow content modification (unless casted into non-const)
     return &m[i + ((size_t) lda) * j];
   }
